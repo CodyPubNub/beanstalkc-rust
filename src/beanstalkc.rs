@@ -1,9 +1,8 @@
 use std::collections::HashMap;
-use std::net::TcpStream;
-use std::net::ToSocketAddrs;
 use std::time::Duration;
 
-use bufstream::BufStream;
+use tokio::io::BufReader;
+use tokio::net::TcpStream;
 
 use crate::command;
 use crate::config::*;
@@ -18,7 +17,7 @@ pub struct Beanstalkc {
     host: String,
     port: u16,
     connection_timeout: Option<Duration>,
-    stream: Option<BufStream<TcpStream>>,
+    stream: Option<BufReader<TcpStream>>,
 }
 
 impl Beanstalkc {
@@ -38,9 +37,12 @@ impl Beanstalkc {
     /// # Example:
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().host("localhost").connect().unwrap();
+    /// let mut conn = Beanstalkc::new().host("localhost").connect().await.unwrap();
+    /// }
     /// ```
     pub fn host(mut self, host: &str) -> Self {
         self.host = host.to_string();
@@ -52,9 +54,12 @@ impl Beanstalkc {
     /// # Example:
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().port(12345).connect().unwrap();
+    /// let mut conn = Beanstalkc::new().port(12345).connect().await.unwrap();
+    /// }
     /// ```
     pub fn port(mut self, port: u16) -> Self {
         self.port = port;
@@ -67,34 +72,42 @@ impl Beanstalkc {
     /// # Example:
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use std::time::Duration;
     /// use beanstalkc::Beanstalkc;
     ///
     /// let mut conn = Beanstalkc::new()
     ///        .connection_timeout(Some(Duration::from_secs(10)))
-    ///        .connect()
+    ///        .connect().await
     ///        .unwrap();
+    /// }
     /// ```
     pub fn connection_timeout(mut self, timeout: Option<Duration>) -> Self {
         self.connection_timeout = timeout;
         self
     }
 
-    /// Connect to a running beanstalkd server.
+    /// Connect to a running beanstal.awaitkd server.
     ///
     /// # Examples
     ///
     /// Basic usage
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
+    /// }
     /// ```
     ///
     /// With custom configurations
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use std::time::Duration;
     /// use beanstalkc::Beanstalkc;
     ///
@@ -102,31 +115,33 @@ impl Beanstalkc {
     ///        .host("127.0.0.1")
     ///        .port(11300)
     ///        .connection_timeout(Some(Duration::from_secs(5)))
-    ///        .connect()
+    ///        .connect().await
     ///        .unwrap();
+    /// }
     /// ```
-    pub fn connect(mut self) -> BeanstalkcResult<Self> {
+    pub async fn connect(mut self) -> BeanstalkcResult<Self> {
         let addr = format!("{}:{}", self.host, self.port);
-        let tcp_stream = match self.connection_timeout {
-            Some(timeout) => {
-                let addresses: Vec<_> = addr
-                    .to_socket_addrs()
-                    .unwrap_or_else(|_| panic!("failed to parse address: {}", addr))
-                    .filter(|x| x.is_ipv4())
-                    .collect();
-                // FIXME: maybe we should try every possible addresses?
-                TcpStream::connect_timeout(&addresses.first().unwrap(), timeout)?
-            }
-            None => TcpStream::connect(&addr)?,
-        };
-        self.stream = Some(BufStream::new(tcp_stream));
+        // let tcp_stream = match self.connection_timeout {
+        //     Some(timeout) => {
+        //         let addresses: Vec<_> = addr
+        //             .to_socket_addrs()
+        //             .unwrap_or_else(|_| panic!("failed to parse address: {}", addr))
+        //             .filter(|x| x.is_ipv4())
+        //             .collect();
+        //         // FIXME: maybe we should try every possible addresses?
+        //         TcpStream::connect_timeout(&addresses.first().unwrap(), timeout)?
+        //     }
+        //     None => TcpStream::connect(&addr).await?,
+        // };
+        let tcp_stream = TcpStream::connect(&addr).await?;
+        self.stream = Some(BufReader::new(tcp_stream));
         Ok(self)
     }
 
     /// Close connection to remote server.
     #[allow(unused_must_use)]
-    fn close(&mut self) {
-        self.send(command::quit());
+    async fn close(&mut self) {
+        self.send(command::quit()).await;
     }
 
     /// Re-connect to the beanstalkd server.
@@ -134,14 +149,17 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
-    /// let mut conn = conn.reconnect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
+    /// let mut conn = conn.reconnect().await.unwrap();
+    /// }
     /// ```
-    pub fn reconnect(mut self) -> BeanstalkcResult<Self> {
-        self.close();
-        self.connect()
+    pub async fn reconnect(mut self) -> BeanstalkcResult<Self> {
+        self.close().await;
+        self.connect().await
     }
 
     /// Put a job into the current tube with default configs. Return job id.
@@ -149,19 +167,23 @@ impl Beanstalkc {
     /// # Example:
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let job_id = conn.put_default(b"Rust").unwrap();
+    /// let job_id = conn.put_default(b"Rust").await.unwrap();
+    /// }
     /// ```
-    pub fn put_default(&mut self, body: &[u8]) -> BeanstalkcResult<u64> {
+    pub async fn put_default(&mut self, body: &[u8]) -> BeanstalkcResult<u64> {
         self.put(
             body,
             DEFAULT_JOB_PRIORITY,
             DEFAULT_JOB_DELAY,
             DEFAULT_JOB_TTR,
         )
+        .await
     }
 
     /// Put a job into the current tube and return the job id.
@@ -170,9 +192,11 @@ impl Beanstalkc {
     ///
     /// ```no_run
     /// use std::time::Duration;
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
     /// let job_id = conn.put(
     ///        b"Rust",
@@ -180,8 +204,9 @@ impl Beanstalkc {
     ///        Duration::from_secs(1),
     ///        Duration::from_secs(10),
     ///    );
+    /// }
     /// ```
-    pub fn put(
+    pub async fn put(
         &mut self,
         body: &[u8],
         priority: u32,
@@ -189,6 +214,7 @@ impl Beanstalkc {
         ttr: Duration,
     ) -> BeanstalkcResult<u64> {
         self.send(command::put(body, priority, delay, ttr))
+            .await
             .and_then(|r| r.job_id())
     }
 
@@ -197,23 +223,26 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let mut job = conn.reserve().unwrap();
+    /// let mut job = conn.reserve().await.unwrap();
     /// // Execute job...
     /// dbg!(job.id());
     /// dbg!(job.body());
     ///
-    /// job.delete().unwrap();
+    /// job.delete().await.unwrap();
+    /// }
     /// ```
-    pub fn reserve(&mut self) -> BeanstalkcResult<Job> {
-        let resp = self.send(command::reserve(None))?;
+    pub async fn reserve(&mut self) -> BeanstalkcResult<Job> {
+        let resp = self.send(command::reserve(None)).await?;
         Ok(Job::new(
             self,
             resp.job_id()?,
-            Vec::from(resp.body.unwrap_or_default()),
+            resp.body.unwrap_or_default(),
             true,
         ))
     }
@@ -225,23 +254,26 @@ impl Beanstalkc {
     ///
     /// ```no_run
     /// use beanstalkc::Beanstalkc;
+    /// #[tokio::main]
+    /// async fn main() {
     /// use std::time::Duration;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let mut job = conn.reserve_with_timeout(Duration::from_secs(10)).unwrap();
+    /// let mut job = conn.reserve_with_timeout(Duration::from_secs(10)).await.unwrap();
     /// // Execute job...
     /// dbg!(job.id());
     /// dbg!(job.body());
     ///
-    /// job.delete().unwrap();
+    /// job.delete().await.unwrap();
+    /// }
     /// ```
-    pub fn reserve_with_timeout(&mut self, timeout: Duration) -> BeanstalkcResult<Job> {
-        let resp = self.send(command::reserve(Some(timeout)))?;
+    pub async fn reserve_with_timeout(&mut self, timeout: Duration) -> BeanstalkcResult<Job> {
+        let resp = self.send(command::reserve(Some(timeout))).await?;
         Ok(Job::new(
             self,
             resp.job_id()?,
-            Vec::from(resp.body.unwrap_or_default()),
+            resp.body.unwrap_or_default(),
             true,
         ))
     }
@@ -251,14 +283,18 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// assert_eq!(10, conn.kick(10).unwrap());
+    /// assert_eq!(10, conn.kick(10).await.unwrap());
+    /// }
     /// ```
-    pub fn kick(&mut self, bound: u32) -> BeanstalkcResult<u64> {
+    pub async fn kick(&mut self, bound: u32) -> BeanstalkcResult<u64> {
         self.send(command::kick(bound))
+            .await
             .and_then(|r| r.get_int_param(0))
     }
 
@@ -267,14 +303,17 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// conn.kick(123).unwrap();
+    /// conn.kick(123).await.unwrap();
+    /// }
     /// ```
-    pub fn kick_job(&mut self, job_id: u64) -> BeanstalkcResult<()> {
-        self.send(command::kick_job(job_id)).map(|_| ())
+    pub async fn kick_job(&mut self, job_id: u64) -> BeanstalkcResult<()> {
+        self.send(command::kick_job(job_id)).await.map(|_| ())
     }
 
     /// Return a specific job.
@@ -282,15 +321,18 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let mut job = conn.peek(1).unwrap();
+    /// let mut job = conn.peek(1).await.unwrap();
     /// assert_eq!(1, job.id());
+    /// }
     /// ```
-    pub fn peek(&mut self, job_id: u64) -> BeanstalkcResult<Job> {
-        self.do_peek(command::peek_job(job_id))
+    pub async fn peek(&mut self, job_id: u64) -> BeanstalkcResult<Job> {
+        self.do_peek(command::peek_job(job_id)).await
     }
 
     /// Return the next ready job.
@@ -298,16 +340,19 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let mut job = conn.peek_ready().unwrap();
+    /// let mut job = conn.peek_ready().await.unwrap();
     /// dbg!(job.id());
     /// dbg!(job.body());
+    /// }
     /// ```
-    pub fn peek_ready(&mut self) -> BeanstalkcResult<Job> {
-        self.do_peek(command::peek_ready())
+    pub async fn peek_ready(&mut self) -> BeanstalkcResult<Job> {
+        self.do_peek(command::peek_ready()).await
     }
 
     /// Return the delayed job with the shortest delay left.
@@ -315,16 +360,19 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let mut job = conn.peek_delayed().unwrap();
+    /// let mut job = conn.peek_delayed().await.unwrap();
     /// dbg!(job.id());
     /// dbg!(job.body());
+    /// }
     /// ```
-    pub fn peek_delayed(&mut self) -> BeanstalkcResult<Job> {
-        self.do_peek(command::peek_delayed())
+    pub async fn peek_delayed(&mut self) -> BeanstalkcResult<Job> {
+        self.do_peek(command::peek_delayed()).await
     }
 
     /// Return the next job in the list of buried jobs.
@@ -332,24 +380,27 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let mut job = conn.peek_buried().unwrap();
+    /// let mut job = conn.peek_buried().await.unwrap();
     /// dbg!(job.id());
     /// dbg!(job.body());
+    /// }
     /// ```
-    pub fn peek_buried(&mut self) -> BeanstalkcResult<Job> {
-        self.do_peek(command::peek_buried())
+    pub async fn peek_buried(&mut self) -> BeanstalkcResult<Job> {
+        self.do_peek(command::peek_buried()).await
     }
 
-    pub fn do_peek(&mut self, cmd: command::Command) -> BeanstalkcResult<Job> {
-        let resp = self.send(cmd)?;
+    pub async fn do_peek(&mut self, cmd: command::Command<'_>) -> BeanstalkcResult<Job> {
+        let resp = self.send(cmd).await?;
         Ok(Job::new(
             self,
             resp.job_id()?,
-            Vec::from(resp.body.unwrap_or_default()),
+            resp.body.unwrap_or_default(),
             false,
         ))
     }
@@ -359,15 +410,18 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let tubes = conn.tubes().unwrap();
+    /// let tubes = conn.tubes().await.unwrap();
     /// assert!(tubes.contains(&String::from("default")));
+    /// }
     /// ```
-    pub fn tubes(&mut self) -> BeanstalkcResult<Vec<String>> {
-        Ok(self.send(command::tubes())?.body_as_vec()?)
+    pub async fn tubes(&mut self) -> BeanstalkcResult<Vec<String>> {
+        self.send(command::tubes()).await?.body_as_vec()
     }
 
     /// Return the tube currently being used.
@@ -375,15 +429,20 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let tube = conn.using().unwrap();
+    /// let tube = conn.using().await.unwrap();
     /// assert_eq!("default".to_string(), tube);
+    /// }
     /// ```
-    pub fn using(&mut self) -> BeanstalkcResult<String> {
-        self.send(command::using()).and_then(|r| r.get_param(0))
+    pub async fn using(&mut self) -> BeanstalkcResult<String> {
+        self.send(command::using())
+            .await
+            .and_then(|r| r.get_param(0))
     }
 
     /// Use a given tube.
@@ -391,15 +450,19 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let tube = conn.use_tube("jobs").unwrap();
+    /// let tube = conn.use_tube("jobs").await.unwrap();
     /// assert_eq!("jobs".to_string(), tube);
+    /// }
     /// ```
-    pub fn use_tube(&mut self, name: &str) -> BeanstalkcResult<String> {
+    pub async fn use_tube(&mut self, name: &str) -> BeanstalkcResult<String> {
         self.send(command::use_tube(name))
+            .await
             .and_then(|r| r.get_param(0))
     }
 
@@ -408,15 +471,18 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let tubes = conn.watching().unwrap();
+    /// let tubes = conn.watching().await.unwrap();
     /// assert_eq!(vec!["default".to_string()], tubes);
+    /// }
     /// ```
-    pub fn watching(&mut self) -> BeanstalkcResult<Vec<String>> {
-        Ok(self.send(command::watching())?.body_as_vec()?)
+    pub async fn watching(&mut self) -> BeanstalkcResult<Vec<String>> {
+        self.send(command::watching()).await?.body_as_vec()
     }
 
     /// Watch a specific tube.
@@ -424,15 +490,19 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let watched_count = conn.watch("foo").unwrap();
+    /// let watched_count = conn.watch("foo").await.unwrap();
     /// assert_eq!(2, watched_count);
+    /// }
     /// ```
-    pub fn watch(&mut self, name: &str) -> BeanstalkcResult<u64> {
+    pub async fn watch(&mut self, name: &str) -> BeanstalkcResult<u64> {
         self.send(command::watch(name))
+            .await
             .and_then(|r| r.get_int_param(0))
     }
 
@@ -441,13 +511,17 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
-    /// conn.ignore("foo").unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
+    /// conn.ignore("foo").await.unwrap();
+    /// }
     /// ```
-    pub fn ignore(&mut self, name: &str) -> BeanstalkcResult<u64> {
+    pub async fn ignore(&mut self, name: &str) -> BeanstalkcResult<u64> {
         self.send(command::ignore(name))
+            .await
             .and_then(|r| r.get_int_param(0))
     }
 
@@ -456,14 +530,17 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// dbg!(conn.stats().unwrap());
+    /// dbg!(conn.stats().await.unwrap());
+    /// }
     /// ```
-    pub fn stats(&mut self) -> BeanstalkcResult<HashMap<String, String>> {
-        Ok(self.send(command::stats())?.body_as_map()?)
+    pub async fn stats(&mut self) -> BeanstalkcResult<HashMap<String, String>> {
+        self.send(command::stats()).await?.body_as_map()
     }
 
     /// Return a dict of statistical information about the specified tube.
@@ -471,14 +548,17 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// dbg!(conn.stats_tube("default").unwrap());
+    /// dbg!(conn.stats_tube("default").await.unwrap());
+    /// }
     /// ```
-    pub fn stats_tube(&mut self, name: &str) -> BeanstalkcResult<HashMap<String, String>> {
-        Ok(self.send(command::stats_tube(name))?.body_as_map()?)
+    pub async fn stats_tube(&mut self, name: &str) -> BeanstalkcResult<HashMap<String, String>> {
+        self.send(command::stats_tube(name)).await?.body_as_map()
     }
 
     /// Pause the specific tube for `delay` time.
@@ -486,14 +566,19 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use std::time::Duration;
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
-    /// conn.pause_tube("default", Duration::from_secs(100));
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
+    /// conn.pause_tube("default", Duration::from_secs(100)).await;
+    /// }
     /// ```
-    pub fn pause_tube(&mut self, name: &str, delay: Duration) -> BeanstalkcResult<()> {
-        self.send(command::pause_tube(name, delay)).map(|_| ())
+    pub async fn pause_tube(&mut self, name: &str, delay: Duration) -> BeanstalkcResult<()> {
+        self.send(command::pause_tube(name, delay))
+            .await
+            .map(|_| ())
     }
 
     /// Delete job by job id.
@@ -501,18 +586,21 @@ impl Beanstalkc {
     /// # Examples
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// conn.delete(123).unwrap();
+    /// conn.delete(123).await.unwrap();
     ///
-    /// let mut job = conn.reserve().unwrap();
+    /// let mut job = conn.reserve().await.unwrap();
     /// // Recommended way to delete a job
-    /// job.delete().unwrap();
+    /// job.delete().await.unwrap();
+    /// }
     /// ```
-    pub fn delete(&mut self, job_id: u64) -> BeanstalkcResult<()> {
-        self.send(command::delete(job_id)).map(|_| ())
+    pub async fn delete(&mut self, job_id: u64) -> BeanstalkcResult<()> {
+        self.send(command::delete(job_id)).await.map(|_| ())
     }
 
     /// Release a reserved job back into the ready queue with default priority and delay.
@@ -520,14 +608,18 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// conn.release_default(1).unwrap();
+    /// conn.release_default(1).await.unwrap();
+    /// }
     /// ```
-    pub fn release_default(&mut self, job_id: u64) -> BeanstalkcResult<()> {
+    pub async fn release_default(&mut self, job_id: u64) -> BeanstalkcResult<()> {
         self.release(job_id, DEFAULT_JOB_PRIORITY, DEFAULT_JOB_DELAY)
+            .await
     }
 
     /// Release a reserved job back into the ready queue.
@@ -536,14 +628,23 @@ impl Beanstalkc {
     ///
     /// ```no_run
     /// use std::time::Duration;
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// conn.release(1, 0, Duration::from_secs(10)).unwrap();
+    /// conn.release(1, 0, Duration::from_secs(10)).await.unwrap();
+    /// }
     /// ```
-    pub fn release(&mut self, job_id: u64, priority: u32, delay: Duration) -> BeanstalkcResult<()> {
+    pub async fn release(
+        &mut self,
+        job_id: u64,
+        priority: u32,
+        delay: Duration,
+    ) -> BeanstalkcResult<()> {
         self.send(command::release(job_id, priority, delay))
+            .await
             .map(|_| ())
     }
 
@@ -552,14 +653,17 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// conn.bury_default(1).unwrap();
+    /// conn.bury_default(1).await.unwrap();
+    /// }
     /// ```
-    pub fn bury_default(&mut self, job_id: u64) -> BeanstalkcResult<()> {
-        self.bury(job_id, DEFAULT_JOB_PRIORITY)
+    pub async fn bury_default(&mut self, job_id: u64) -> BeanstalkcResult<()> {
+        self.bury(job_id, DEFAULT_JOB_PRIORITY).await
     }
 
     /// Bury a specific job.
@@ -567,14 +671,17 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// conn.bury(1, 0).unwrap();
+    /// conn.bury(1, 0).await.unwrap();
+    /// }
     /// ```
-    pub fn bury(&mut self, job_id: u64, priority: u32) -> BeanstalkcResult<()> {
-        self.send(command::bury(job_id, priority)).map(|_| ())
+    pub async fn bury(&mut self, job_id: u64, priority: u32) -> BeanstalkcResult<()> {
+        self.send(command::bury(job_id, priority)).await.map(|_| ())
     }
 
     /// Touch a job by `job_id`. Allowing the worker to request more time on a reserved
@@ -583,14 +690,17 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// conn.touch(1).unwrap();
+    /// conn.touch(1).await.unwrap();
+    /// }
     /// ```
-    pub fn touch(&mut self, job_id: u64) -> BeanstalkcResult<()> {
-        self.send(command::touch(job_id)).map(|_| ())
+    pub async fn touch(&mut self, job_id: u64) -> BeanstalkcResult<()> {
+        self.send(command::touch(job_id)).await.map(|_| ())
     }
 
     /// Return a dict of statistical information about a job.
@@ -598,18 +708,21 @@ impl Beanstalkc {
     /// # Example
     ///
     /// ```no_run
+    /// #[tokio::main]
+    /// async fn main() {
     /// use beanstalkc::Beanstalkc;
     ///
-    /// let mut conn = Beanstalkc::new().connect().unwrap();
+    /// let mut conn = Beanstalkc::new().connect().await.unwrap();
     ///
-    /// let stats = conn.stats_job(1).unwrap();
+    /// let stats = conn.stats_job(1).await.unwrap();
     /// dbg!(stats);
+    /// }
     /// ```
-    pub fn stats_job(&mut self, job_id: u64) -> BeanstalkcResult<HashMap<String, String>> {
-        Ok(self.send(command::stats_job(job_id))?.body_as_map()?)
+    pub async fn stats_job(&mut self, job_id: u64) -> BeanstalkcResult<HashMap<String, String>> {
+        self.send(command::stats_job(job_id)).await?.body_as_map()
     }
 
-    fn send(&mut self, cmd: command::Command) -> BeanstalkcResult<Response> {
+    async fn send(&mut self, cmd: command::Command<'_>) -> BeanstalkcResult<Response> {
         if self.stream.is_none() {
             return Err(BeanstalkcError::ConnectionError(
                 "invalid connection".to_string(),
@@ -617,7 +730,7 @@ impl Beanstalkc {
         }
 
         let mut request = Request::new(self.stream.as_mut().unwrap());
-        let resp = request.send(cmd.build().as_bytes())?;
+        let resp = request.send(cmd.build().as_bytes()).await?;
 
         if cmd.expected_ok_status.contains(&resp.status) {
             Ok(resp)
@@ -632,11 +745,12 @@ impl Beanstalkc {
     }
 }
 
-impl Drop for Beanstalkc {
-    fn drop(&mut self) {
-        self.close();
-    }
-}
+// TODO: Document that self.close should be explicitly called if desired
+// impl Drop for Beanstalkc {
+//     fn drop(&mut self) {
+//         self.close();
+//     }
+// }
 
 impl Default for Beanstalkc {
     fn default() -> Self {

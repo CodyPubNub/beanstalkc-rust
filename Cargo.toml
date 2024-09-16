@@ -16,7 +16,8 @@ name = "beanstalkc"
 path = "src/lib.rs"
 
 [dependencies]
-bufstream = "0.1.4"
+bufstream = { version = "0.1.4", features = ["tokio"] }
+tokio = { version = "1", features = ["full"] }
 serde = "^1.0"
 serde_yaml = "^0.8"
 

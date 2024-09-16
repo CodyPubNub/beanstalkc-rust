@@ -1,3 +1,4 @@
+use std::fmt;
 use std::str::FromStr;
 use std::string::ToString;
 use std::time::Duration;
@@ -32,8 +33,8 @@ pub enum CommandKind {
     PauseTube,
 }
 
-impl ToString for CommandKind {
-    fn to_string(&self) -> String {
+impl fmt::Display for CommandKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let cmd = match *self {
             CommandKind::Put => "put",
             CommandKind::PeekJob => "peek",
@@ -60,7 +61,7 @@ impl ToString for CommandKind {
             CommandKind::Quit => "quit",
             CommandKind::PauseTube => "pause-tube",
         };
-        cmd.to_string()
+        write!(f, "{}", cmd)
     }
 }
 
@@ -198,7 +199,7 @@ pub fn reserve<'a>(timeout: Option<Duration>) -> Command<'a> {
         },
         timeout
             .map(|t| vec![t.as_secs().to_string()])
-            .unwrap_or_else(|| vec![]),
+            .unwrap_or_default(),
         None,
         vec![Status::Reserved],
         vec![Status::TimedOut, Status::DeadlineSoon],

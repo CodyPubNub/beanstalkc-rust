@@ -9,13 +9,13 @@ release:
 	cargo build --release
 
 format:
-	cargo fmt
+	cargo fmt --all
 
 lint:
-	cargo clippy
+	cargo clippy --fix --allow-dirty --allow-staged
 
 test:
-	cargo test -- --test-threads=1
+	cargo test --all
 
 clean:
 	cargo clean

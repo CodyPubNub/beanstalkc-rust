@@ -3,8 +3,8 @@ use std::fmt;
 use std::io;
 use std::net::AddrParseError;
 use std::num::ParseIntError;
-use std::string::FromUtf8Error;
 use std::str::Utf8Error;
+use std::string::FromUtf8Error;
 
 #[derive(Debug, Clone)]
 pub enum BeanstalkcError {

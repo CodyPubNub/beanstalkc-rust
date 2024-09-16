@@ -1,6 +1,5 @@
 use crate::command::Status;
 use crate::error::{BeanstalkcError, BeanstalkcResult};
-use serde_yaml;
 use std::collections::HashMap;
 
 #[derive(Debug)]
@@ -36,7 +35,7 @@ impl Response {
             Some(b) => {
                 let b = std::str::from_utf8(b)?;
                 serde_yaml::from_str(b).unwrap_or_default()
-            },
+            }
         };
         Ok(res)
     }
